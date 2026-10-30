@@ -1,0 +1,143 @@
+name: sheet
+# The entry. a sheet file of cells, each a number or a formula starting with =, computed level by level with every cell of a level at once.
+
+procedures:
+  main:
+    failing: [ aborted, cast_refused, file_failed, json_failed ]
+    access: public
+    parameters:
+      - path: String
+      - out: String?
+    returns: Int
+    body:
+      - var: target
+        value: out/sheet-yaml.txt
+      - value:
+          conditional:
+            when: { present: { ref: out } }
+            then: [ { set: target, value: { as: { of: { ref: out }, type: String } } } ]
+      - let: stored
+        value: { call: { procedure: File.read, arguments: [ ref: path ] } }
+      - value:
+          conditional:
+            when: { not: { present: { ref: stored } } }
+            then: [ value: { abort: { format: "no sheet at ${path}", with: { path: { ref: path } } } } ]
+      - let: parsed
+        value: { call: { procedure: JSON.parse, arguments: [ as: { of: { ref: stored }, type: String } ] } }
+      - let: raw
+        value: { as: { of: { ref: parsed }, type: "Dictionary<String, Any>" } }
+      - let: cells
+        value: { sorted: { keys: { ref: raw } } }
+      - var: nodes
+        type: "Dictionary<String, ast.Node>"
+        value: { dictionary: [] }
+      - var: deps
+        type: "Dictionary<String, Array<String>>"
+        value: { dictionary: [] }
+      - let: parse
+        value:
+          each:
+            of: { ref: cells }
+            as: cell
+            body:
+              - let: written
+                value: { as: { of: { ref: "raw[cell]" }, type: String } }
+              - let: parsed
+                value:
+                  try:
+                    body:
+                      - var: tree
+                        value: { call: { procedure: ast.number, arguments: [ 0.0 ] } }
+                      - value:
+                          conditional:
+                            when: { of: { ref: written }, starts_with: "=" }
+                            then:
+                              - let: formula
+                                value: { of: { drop_first: { characters: { ref: written } } }, joined: '' }
+                              - set: tree
+                                value: { call: { procedure: parse.formula, arguments: [ ref: formula ] } }
+                            else:
+                              - let: n
+                                value: { call: { procedure: lex.number, arguments: [ ref: written ] } }
+                              - set: tree
+                                value: { call: { procedure: ast.number, arguments: [ ref: n ] } }
+                      - let: reads
+                        value: { call: { procedure: ast.refs, arguments: [ ref: tree ] } }
+                      - set: nodes
+                        value: { call: { procedure: Standard.Collection.setting, arguments: [ ref: nodes, ref: cell, ref: tree ] } }
+                      - set: deps
+                        value: { call: { procedure: Standard.Collection.setting, arguments: [ ref: deps, ref: cell, ref: reads ] } }
+                    catch:
+                      - value: { abort: { format: "${cell}: ${message}", with: { cell: { ref: cell }, message: { ref: parsed.message } } } }
+      - let: levels
+        value: { call: { procedure: graph.levels, arguments: [ ref: deps ] } }
+      - value: { call: { procedure: IO.write, arguments: [ { format: "levels: ${n}\n", with: { n: { count: { ref: levels } } } } ] } }
+      - var: values
+        type: "Dictionary<String, Double>"
+        value: { dictionary: [] }
+      - let: computing
+        value:
+          each:
+            of: { ref: levels }
+            as: level
+            body:
+              - let: known
+                value: { ref: values }
+              - let: trees
+                value: { ref: nodes }
+              - var: computed
+              - let: caught
+                value:
+                  try:
+                    body:
+                      - let: answers
+                        value:
+                          call:
+                            procedure: Standard.Concurrent.map
+                            arguments:
+                              - { ref: level }
+                              - closure:
+                                  parameters: [ item: String, index: Int ]
+                                  returns: Double
+                                  failing: [ aborted, cast_refused ]
+                                  isolated: true
+                                  result: { call: { procedure: eval.node, arguments: [ ref: "trees[item]", ref: known ] } }
+                      - set: computed
+                        value: { ref: answers }
+                    catch:
+                      - let: failures
+                        value: { as: { of: { ref: 'caught.details["failures"]' }, type: "Dictionary<Int, Any>" } }
+                      - let: first
+                        value: { call: { procedure: firstFailure, arguments: [ ref: failures, ref: level ] } }
+                      - value: { abort: { ref: first } }
+              - let: walk
+                value:
+                  each:
+                    of: { ref: level }
+                    as: cell
+                    index: index
+                    body:
+                      - set: values
+                        value: { call: { procedure: Standard.Collection.setting, arguments: [ ref: values, ref: cell, ref: "computed[index]" ] } }
+      - let: grid
+        value: { call: { procedure: format.grid, arguments: [ ref: values ] } }
+      - value: { call: { procedure: File.write, arguments: [ ref: target, ref: grid ] } }
+      - let: json
+        value: { call: { procedure: JSON.text, arguments: [ ref: values ] } }
+      - value: { call: { procedure: File.write, arguments: [ { format: "${out}.json", with: { out: { ref: target } } }, ref: json ] } }
+      - value: { call: { procedure: IO.write, arguments: [ { format: "${grid}\n", with: { grid: { ref: grid } } } ] } }
+    result: { count: { ref: values } }
+
+  # the failure at the lowest position of the level, the keys standing in order: its cell, and its message
+  firstFailure:
+    failing: [ cast_refused ]
+    parameters: [ failures: "Dictionary<Int, Any>", level: Array<String> ]
+    returns: String
+    body:
+      - let: positions
+        value: { keys: { ref: failures } }
+      - let: index
+        value: { ref: "positions[0]" }
+      - let: piece
+        value: { as: { of: { ref: "failures[index]" }, type: Failure } }
+    result: { format: "${cell}: ${message}", with: { cell: { ref: "level[index]" }, message: { ref: piece.message } } }

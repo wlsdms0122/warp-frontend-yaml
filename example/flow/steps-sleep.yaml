@@ -1,0 +1,28 @@
+name: flow
+# The sleep step. Wait a number of milliseconds.
+
+types:
+  Sleep:
+    struct: { id: String, ms: Int }
+    satisfies: [ flow.Runnable ]
+    procedures:
+      run:
+        failing: [ cast_refused ]
+        parameters: [ of: Sleep ]
+        returns: flow.Outcome
+        body:
+          - value: { call: { procedure: Time.wait, arguments: [ ref: of.ms ] } }
+        result: { call: { procedure: flow.succeeded, arguments: [ ref: of.id, ref: of.ms, { format: "slept ${ms} ms", with: { ms: { ref: of.ms } } } ] } }
+
+      describe:
+        const: true
+        parameters: [ of: Sleep ]
+        returns: String
+        result: { format: "sleep ${ms}", with: { ms: { ref: of.ms } } }
+
+procedures:
+  Sleep.parse:
+    failing: [ cast_refused ]
+    parameters: [ of: "Dictionary<String, Any>" ]
+    returns: Sleep
+    result: { as: { of: { struct: { id: { as: { of: { ref: 'of["id"]' }, type: String } }, ms: { as: { of: { ref: 'of["ms"]' }, type: Int } } } }, type: Sleep } }

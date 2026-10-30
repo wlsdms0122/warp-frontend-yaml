@@ -1,0 +1,138 @@
+name: eval
+# Evaluates a tree. numbers, cells read from what is computed, + - * / with a refusal to divide by zero, and SUM MIN MAX AVG over arguments and ranges.
+
+procedures:
+  cell:
+    isolated: true
+    failing: [ aborted, cast_refused ]
+    parameters: [ name: String, values: "Dictionary<String, Double>" ]
+    returns: Double
+    body:
+      - let: held
+        value: { ref: "values?[name]" }
+      - value:
+          conditional:
+            when: { not: { present: { ref: held } } }
+            then: [ value: { abort: { format: "'${name}' is empty", with: { name: { ref: name } } } } ]
+    result: { as: { of: { ref: held }, type: Double } }
+
+  # the numbers an argument list stands for, ranges expanded
+  gather:
+    isolated: true
+    failing: [ aborted, cast_refused ]
+    parameters: [ args: Array<ast.Node>, values: "Dictionary<String, Double>" ]
+    returns: Array<Double>
+    body:
+      - var: out
+        type: Array<Double>
+        value: []
+      - let: walk
+        value:
+          each:
+            of: { ref: args }
+            as: arg
+            body:
+              - value:
+                  conditional:
+                    when: { of: { ref: arg.kind }, is: range }
+                    then:
+                      - let: cells
+                        value: { call: { procedure: ast.cells, arguments: [ as: { of: { ref: "arg.left?.name" }, type: String }, as: { of: { ref: "arg.right?.name" }, type: String } ] } }
+                      - let: walk2
+                        value:
+                          each:
+                            of: { ref: cells }
+                            as: name
+                            body:
+                              - let: held
+                                value: { call: { procedure: cell, arguments: [ ref: name, ref: values ] } }
+                              - set: out
+                                value: { of: { ref: out }, appending: { ref: held } }
+                    else:
+                      - let: one
+                        value: { call: { procedure: node, arguments: [ ref: arg, ref: values ] } }
+                      - set: out
+                        value: { of: { ref: out }, appending: { ref: one } }
+    result: { ref: out }
+
+  function:
+    isolated: true
+    failing: [ aborted ]
+    parameters: [ name: String, over: Array<Double> ]
+    returns: Double
+    body:
+      - value:
+          conditional:
+            when: { of: { count: { ref: over } }, is: 0 }
+            then: [ value: { abort: { format: "${name} over nothing", with: { name: { ref: name } } } } ]
+      - var: acc
+        value: { ref: "over[0]" }
+      - let: rest
+        value: { drop_first: { ref: over } }
+      - let: walk3
+        value:
+          each:
+            of: { ref: rest }
+            as: x
+            body:
+              - value:
+                  cases:
+                    - when: { of: { ref: name }, one_of: [ SUM, AVG ] }
+                      then: [ { set: acc, value: { of: { ref: acc }, plus: { ref: x } } } ]
+                    - when: { of: { ref: name }, is: MAX }
+                      then: [ { set: acc, value: { of: { ref: acc }, max: { ref: x } } } ]
+                    - when: { of: { ref: name }, is: MIN }
+                      then: [ { set: acc, value: { of: { ref: acc }, min: { ref: x } } } ]
+                    - else: [ value: { abort: { format: "no function named ${name}", with: { name: { ref: name } } } } ]
+      - value:
+          conditional:
+            when: { of: { ref: name }, is: AVG }
+            # Int and Double never convert, so the count is divided by one to read as the Double it names.
+            then: [ { set: acc, value: { of: { ref: acc }, divided_by: { of: { count: { ref: over } }, divided_by: 1 } } } ]
+    result: { ref: acc }
+
+  node:
+    isolated: true
+    failing: [ aborted, cast_refused ]
+    parameters: [ of: ast.Node, values: "Dictionary<String, Double>" ]
+    returns: Double
+    body:
+      - var: answer
+        value: 0.0
+      - value:
+          cases:
+            - when: { of: { ref: of.kind }, is: number }
+              then: [ { set: answer, value: { ref: of.number } } ]
+            - when: { of: { ref: of.kind }, is: ref }
+              then: [ { set: answer, value: { call: { procedure: cell, arguments: [ ref: of.name, ref: values ] } } } ]
+            - when: { of: { ref: of.kind }, is: binary }
+              then:
+                - let: l
+                  value: { call: { procedure: node, arguments: [ as: { of: { ref: of.left }, type: ast.Node }, ref: values ] } }
+                - let: r
+                  value: { call: { procedure: node, arguments: [ as: { of: { ref: of.right }, type: ast.Node }, ref: values ] } }
+                - value:
+                    cases:
+                      - when: { of: { ref: of.name }, is: "+" }
+                        then: [ { set: answer, value: { of: { ref: l }, plus: { ref: r } } } ]
+                      - when: { of: { ref: of.name }, is: "-" }
+                        then: [ { set: answer, value: { of: { ref: l }, minus: { ref: r } } } ]
+                      - when: { of: { ref: of.name }, is: "*" }
+                        then: [ { set: answer, value: { of: { ref: l }, times: { ref: r } } } ]
+                      - when: { of: { ref: of.name }, is: "/" }
+                        then:
+                          - value:
+                              conditional:
+                                when: { of: { ref: r }, is: 0.0 }
+                                then: [ value: { abort: "division by zero" } ]
+                          - set: answer
+                            value: { of: { ref: l }, divided_by: { ref: r } }
+                      - else: [ value: { abort: { format: "no operator ${name}", with: { name: { ref: of.name } } } } ]
+            - when: { of: { ref: of.kind }, is: call }
+              then:
+                - let: gathered
+                  value: { call: { procedure: gather, arguments: [ ref: of.args, ref: values ] } }
+                - set: answer
+                  value: { call: { procedure: function, arguments: [ ref: of.name, ref: gathered ] } }
+            - else: [ value: { abort: { format: "a ${kind} stands where a value should", with: { kind: { ref: of.kind } } } } ]
+    result: { ref: answer }

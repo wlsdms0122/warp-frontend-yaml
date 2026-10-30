@@ -1,0 +1,67 @@
+name: graph
+# Levels of cells. A cell's level is one past the deepest cell it reads. A round that settles nothing while cells remain is a cycle.
+
+procedures:
+  levels:
+    failing: [ aborted ]
+    parameters: [ deps: "Dictionary<String, Array<String>>" ]
+    returns: Array<Array<String>>
+    body:
+      - var: remaining
+        value: { sorted: { keys: { ref: deps } } }
+      - var: settled
+        type: Array<String>
+        value: []
+      - var: levels
+        type: Array<Array<String>>
+        value: []
+      - value:
+          loop:
+            while: { of: { count: { ref: remaining } }, greater_than: 0 }
+            body:
+              - var: ready
+                type: Array<String>
+                value: []
+              - var: waiting
+                type: Array<String>
+                value: []
+              - let: walk
+                value:
+                  each:
+                    of: { ref: remaining }
+                    as: cell
+                    body:
+                      - let: needs
+                        value: { ref: "deps[cell]" }
+                      - var: all
+                        value: true
+                      - let: walk2
+                        value:
+                          each:
+                            of: { ref: needs }
+                            as: need
+                            body:
+                              - value:
+                                  conditional:
+                                    when: { not: { of: { ref: settled }, contains: { ref: need } } }
+                                    then: [ { set: all, value: false } ]
+                      - value:
+                          conditional:
+                            when: { ref: all }
+                            then: [ { set: ready, value: { of: { ref: ready }, appending: { ref: cell } } } ]
+                            else: [ { set: waiting, value: { of: { ref: waiting }, appending: { ref: cell } } } ]
+              - value:
+                  conditional:
+                    when: { of: { count: { ref: ready } }, is: 0 }
+                    then: [ value: { abort: { format: "a cycle among ${cells}", with: { cells: { of: { ref: waiting }, joined: ", " } } } } ]
+              - set: levels
+                value: { of: { ref: levels }, appending: { ref: ready } }
+              - let: walk3
+                value:
+                  each:
+                    of: { ref: ready }
+                    as: cell
+                    body: [ { set: settled, value: { of: { ref: settled }, appending: { ref: cell } } } ]
+              - set: remaining
+                value: { ref: waiting }
+    result: { ref: levels }

@@ -1,0 +1,21 @@
+name: state
+# The values steps produced, kept by step id for the steps after them.
+
+var:
+  values: { type: "Dictionary<String, Any>", value: { dictionary: [] } }
+
+procedures:
+  put:
+    parameters: [ id: String, value: Any ]
+    body:
+      - set: values
+        value: { call: { procedure: Standard.Collection.setting, arguments: [ ref: values, ref: id, ref: value ] } }
+
+  get:
+    parameters: [ id: String ]
+    returns: Any
+    result: { ref: "values?[id]" }
+
+  all:
+    returns: "Dictionary<String, Any>"
+    result: { ref: values }

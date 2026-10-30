@@ -1,0 +1,48 @@
+name: flow
+# The fetch step. GET a url and keep the JSON body under the step's id.
+
+types:
+  Fetch:
+    struct: { id: String, url: String }
+    satisfies: [ flow.Runnable ]
+    procedures:
+      run:
+        failing: [ cast_refused ]
+        parameters: [ of: Fetch ]
+        returns: flow.Outcome
+        body:
+          - var: outcome
+          - let: caught
+            value:
+              try:
+                body:
+                  - let: response
+                    value: { call: { procedure: Net.get, arguments: [ ref: of.url, null ] } }
+                  - let: body
+                    value: { call: { procedure: JSON.parse, arguments: [ ref: response.body ] } }
+                  - value: { call: { procedure: state.put, arguments: [ ref: of.id, ref: body ] } }
+                  - set: outcome
+                    value:
+                      call:
+                        procedure: flow.succeeded
+                        arguments:
+                          - { ref: of.id }
+                          - { ref: body }
+                          - { format: "status ${status}", with: { status: { ref: response.status } } }
+                catch:
+                  - set: outcome
+                    value: { call: { procedure: flow.failed, arguments: [ ref: of.id, { format: "fetch failed: ${message}", with: { message: { ref: caught.message } } } ] } }
+        result: { ref: outcome }
+
+      describe:
+        const: true
+        parameters: [ of: Fetch ]
+        returns: String
+        result: { format: "fetch ${url}", with: { url: { ref: of.url } } }
+
+procedures:
+  Fetch.parse:
+    failing: [ cast_refused ]
+    parameters: [ of: "Dictionary<String, Any>" ]
+    returns: Fetch
+    result: { as: { of: { struct: { id: { as: { of: { ref: 'of["id"]' }, type: String } }, url: { as: { of: { ref: 'of["url"]' }, type: String } } } }, type: Fetch } }

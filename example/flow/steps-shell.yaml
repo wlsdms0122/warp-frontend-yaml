@@ -1,0 +1,49 @@
+name: flow
+# The shell step. Run a shell command and keep its output.
+
+types:
+  Shell:
+    struct: { id: String, command: String }
+    satisfies: [ flow.Runnable ]
+    procedures:
+      run:
+        failing: [ cast_refused ]
+        parameters: [ of: Shell ]
+        returns: flow.Outcome
+        body:
+          - var: outcome
+          - let: caught
+            value:
+              try:
+                body:
+                  - let: result
+                    value: { call: { procedure: Process.run, arguments: [ ref: of.command ] } }
+                  - value: { call: { procedure: state.put, arguments: [ ref: of.id, ref: result.output ] } }
+                  - set: outcome
+                    value:
+                      call:
+                        procedure: flow.failed
+                        arguments:
+                          - { ref: of.id }
+                          - { format: "exit ${status}: ${output}", with: { status: { ref: result.status }, output: { ref: result.output } } }
+                  - value:
+                      conditional:
+                        when: { of: { ref: result.status }, is: 0 }
+                        then: [ { set: outcome, value: { call: { procedure: flow.succeeded, arguments: [ ref: of.id, ref: result.output, "exit 0" ] } } } ]
+                catch:
+                  - set: outcome
+                    value: { call: { procedure: flow.failed, arguments: [ ref: of.id, { format: "shell failed: ${message}", with: { message: { ref: caught.message } } } ] } }
+        result: { ref: outcome }
+
+      describe:
+        const: true
+        parameters: [ of: Shell ]
+        returns: String
+        result: { format: "shell `${command}`", with: { command: { ref: of.command } } }
+
+procedures:
+  Shell.parse:
+    failing: [ cast_refused ]
+    parameters: [ of: "Dictionary<String, Any>" ]
+    returns: Shell
+    result: { as: { of: { struct: { id: { as: { of: { ref: 'of["id"]' }, type: String } }, command: { as: { of: { ref: 'of["command"]' }, type: String } } } }, type: Shell } }

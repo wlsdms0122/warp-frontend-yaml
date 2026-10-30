@@ -1,0 +1,69 @@
+name: report
+# Renders outcomes. one line each, a summary, and a JSON file beside the text.
+
+procedures:
+  flow.Outcome.line:
+    const: true
+    parameters: [ of: flow.Outcome ]
+    returns: String
+    body:
+      - var: mark
+        type: String
+        value: "FAIL "
+      - value:
+          conditional:
+            when: { ref: of.ok }
+            then: [ { set: mark, value: "ok   " } ]
+    result: { format: "${mark}${id}: ${message}", with: { mark: { ref: mark }, id: { ref: of.id }, message: { ref: of.message } } }
+
+  failures:
+    parameters: [ of: Array<flow.Outcome> ]
+    returns: Int
+    body:
+      - var: n
+        value: 0
+      - let: walk
+        value:
+          each:
+            of: { ref: of }
+            as: outcome
+            body:
+              - value:
+                  conditional:
+                    when: { not: { ref: outcome.ok } }
+                    then: [ { set: n, value: { of: { ref: n }, plus: 1 } } ]
+    result: { ref: n }
+
+  text:
+    parameters: [ of: Array<flow.Outcome>, elapsed: Int ]
+    returns: String
+    body:
+      - var: lines
+        type: Array<String>
+        value: []
+      - let: walk
+        value:
+          each:
+            of: { ref: of }
+            as: outcome
+            body:
+              - set: lines
+                value: { of: { ref: lines }, appending: { call: { procedure: flow.Outcome.line, arguments: [ ref: outcome ] } } }
+      - let: failed
+        value: { call: { procedure: failures, arguments: [ ref: of ] } }
+      - set: lines
+        value: { of: { ref: lines }, appending: { format: "${n} steps, ${failed} failed, ${elapsed} ms", with: { n: { count: { ref: of } }, failed: { ref: failed }, elapsed: { ref: elapsed } } } }
+    result: { of: { ref: lines }, joined: "\n" }
+
+  write:
+    failing: [ file_failed, json_failed ]
+    parameters: [ of: Array<flow.Outcome>, elapsed: Int, path: String ]
+    returns: String
+    body:
+      - let: rendered
+        value: { call: { procedure: text, arguments: [ ref: of, ref: elapsed ] } }
+      - value: { call: { procedure: File.write, arguments: [ ref: path, ref: rendered ] } }
+      - let: json
+        value: { call: { procedure: JSON.text, arguments: [ ref: of ] } }
+      - value: { call: { procedure: File.write, arguments: [ { format: "${path}.json", with: { path: { ref: path } } }, ref: json ] } }
+    result: { ref: rendered }

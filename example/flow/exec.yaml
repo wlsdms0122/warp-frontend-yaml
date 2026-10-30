@@ -1,0 +1,43 @@
+name: exec
+# Runs every step of a plan in order and collects one outcome per step.
+
+procedures:
+  run:
+    failing: [ cast_refused ]
+    parameters: [ plan: flow.Plan ]
+    returns: Array<flow.Outcome>
+    body:
+      - var: outcomes
+        type: Array<flow.Outcome>
+        value: []
+      - let: steps
+        value: { ref: plan.steps }
+      - let: walk
+        value:
+          each:
+            of: { ref: steps }
+            as: step
+            body:
+              - let: label
+                value: { call: { procedure: flow.Runnable.describe, arguments: [ ref: step ] } }
+              - value: { call: { procedure: IO.write, arguments: [ { format: "- ${label}\n", with: { label: { ref: label } } } ] } }
+              - var: outcome
+              - let: caught
+                value:
+                  try:
+                    body:
+                      - let: got
+                        value: { call: { procedure: flow.Runnable.run, arguments: [ ref: step ] } }
+                      - set: outcome
+                        value: { ref: got }
+                    catch:
+                      - set: outcome
+                        value:
+                          call:
+                            procedure: flow.failed
+                            arguments:
+                              - { ref: label }
+                              - { format: "${type}: ${message}", with: { type: { ref: caught.type }, message: { ref: caught.message } } }
+              - set: outcomes
+                value: { of: { ref: outcomes }, appending: { ref: outcome } }
+    result: { ref: outcomes }

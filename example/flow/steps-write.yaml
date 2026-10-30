@@ -1,0 +1,56 @@
+name: flow
+# The write step. Write what another step produced to a file, as text or as JSON.
+
+types:
+  Write:
+    struct: { id: String, path: String, from: String }
+    satisfies: [ flow.Runnable ]
+    procedures:
+      run:
+        failing: [ cast_refused, json_failed ]
+        parameters: [ of: Write ]
+        returns: flow.Outcome
+        body:
+          - let: value
+            value: { call: { procedure: state.get, arguments: [ ref: of.from ] } }
+          - let: plain
+            value: { as?: { of: { ref: value }, type: String } }
+          - var: content
+            type: String
+            value: ""
+          - value:
+              conditional:
+                when: { present: { ref: plain } }
+                then: [ { set: content, value: { as: { of: { ref: plain }, type: String } } } ]
+                else: [ { set: content, value: { call: { procedure: JSON.text, arguments: [ ref: value ] } } } ]
+          - var: outcome
+          - let: caught
+            value:
+              try:
+                body:
+                  - value: { call: { procedure: File.write, arguments: [ ref: of.path, ref: content ] } }
+                  - set: outcome
+                    value:
+                      call:
+                        procedure: flow.succeeded
+                        arguments:
+                          - { ref: of.id }
+                          - { ref: of.path }
+                          - { format: "wrote ${n} characters", with: { n: { count: { ref: content } } } }
+                catch:
+                  - set: outcome
+                    value: { call: { procedure: flow.failed, arguments: [ ref: of.id, { format: "write failed: ${message}", with: { message: { ref: caught.message } } } ] } }
+        result: { ref: outcome }
+
+      describe:
+        const: true
+        parameters: [ of: Write ]
+        returns: String
+        result: { format: "write ${from} to ${path}", with: { from: { ref: of.from }, path: { ref: of.path } } }
+
+procedures:
+  Write.parse:
+    failing: [ cast_refused ]
+    parameters: [ of: "Dictionary<String, Any>" ]
+    returns: Write
+    result: { as: { of: { struct: { id: { as: { of: { ref: 'of["id"]' }, type: String } }, path: { as: { of: { ref: 'of["path"]' }, type: String } }, from: { as: { of: { ref: 'of["from"]' }, type: String } } } }, type: Write } }

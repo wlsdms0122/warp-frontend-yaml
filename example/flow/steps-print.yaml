@@ -1,0 +1,30 @@
+name: flow
+# The print step. Print what another step produced.
+
+types:
+  Print:
+    struct: { id: String, from: String }
+    satisfies: [ flow.Runnable ]
+    procedures:
+      run:
+        failing: [ cast_refused ]
+        parameters: [ of: Print ]
+        returns: flow.Outcome
+        body:
+          - let: value
+            value: { call: { procedure: state.get, arguments: [ ref: of.from ] } }
+          - value: { call: { procedure: IO.write, arguments: [ { format: "  ${from} -> ${value}\n", with: { from: { ref: of.from }, value: { ref: value } } } ] } }
+        result: { call: { procedure: flow.succeeded, arguments: [ ref: of.id, ref: value, printed ] } }
+
+      describe:
+        const: true
+        parameters: [ of: Print ]
+        returns: String
+        result: { format: "print ${from}", with: { from: { ref: of.from } } }
+
+procedures:
+  Print.parse:
+    failing: [ cast_refused ]
+    parameters: [ of: "Dictionary<String, Any>" ]
+    returns: Print
+    result: { as: { of: { struct: { id: { as: { of: { ref: 'of["id"]' }, type: String } }, from: { as: { of: { ref: 'of["from"]' }, type: String } } } }, type: Print } }

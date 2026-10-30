@@ -1,0 +1,208 @@
+name: lex
+# Tokens of a formula (number, name, op, open, close, colon, comma) and the number a text spells.
+
+types:
+  Token: { struct: { kind: String, text: String } }
+
+const:
+  digits:
+    dictionary: [ ["0", 0], ["1", 1], ["2", 2], ["3", 3], ["4", 4], ["5", 5], ["6", 6], ["7", 7], ["8", 8], ["9", 9] ]
+  letters:
+    dictionary: [ ["A", 0], ["B", 1], ["C", 2], ["D", 3], ["E", 4], ["F", 5], ["G", 6], ["H", 7], ["I", 8], ["J", 9], ["K", 10], ["L", 11], ["M", 12], ["N", 13], ["O", 14], ["P", 15], ["Q", 16], ["R", 17], ["S", 18], ["T", 19], ["U", 20], ["V", 21], ["W", 22], ["X", 23], ["Y", 24], ["Z", 25] ]
+  ops: [ "+", "-", "*", "/" ]
+
+procedures:
+  isDigit:
+    isolated: true
+    const: true
+    parameters: [ of: String ]
+    returns: Bool
+    result: { present: { ref: "digits?[of]" } }
+
+  isLetter:
+    isolated: true
+    const: true
+    parameters: [ of: String ]
+    returns: Bool
+    result: { present: { ref: "letters?[of]" } }
+
+  digit:
+    isolated: true
+    const: true
+    parameters: [ of: String ]
+    returns: Int
+    result: { ref: "digits[of]" }
+
+  token:
+    const: true
+    failing: [ cast_refused ]
+    parameters: [ kind: String, text: String ]
+    returns: Token
+    result: { as: { of: { struct: { kind: { ref: kind }, text: { ref: text } } }, type: Token } }
+
+  # a run of characters from `at` while they keep the run going, returned with where it stopped
+  run:
+    parameters: [ chars: Array<String>, at: inout Int, lettersToo: Bool ]
+    returns: String
+    body:
+      - var: out
+        type: Array<String>
+        value: []
+      - var: going
+        value: true
+      - value:
+          loop:
+            while: { ref: going }
+            body:
+              - value:
+                  cases:
+                    - when: { of: { ref: at }, less_than: { count: { ref: chars } } }
+                      then:
+                        - let: ch
+                          value: { ref: "chars[at]" }
+                        - let: ok
+                          value:
+                            any_of:
+                              - { isDigit: { ref: ch } }
+                              - { of: { ref: ch }, is: "." }
+                              - all_of: [ ref: lettersToo, isLetter: { ref: ch } ]
+                        - value:
+                            cases:
+                              - when: { ref: ok }
+                                then:
+                                  - set: out
+                                    value: { of: { ref: out }, appending: { ref: ch } }
+                                  - set: at
+                                    value: { of: { ref: at }, plus: 1 }
+                              - else:
+                                  - set: going
+                                    value: false
+                    - else:
+                        - set: going
+                          value: false
+    result: { of: { ref: out }, joined: '' }
+
+  tokens:
+    failing: [ aborted, cast_refused ]
+    access: public
+    parameters: [ of: String ]
+    returns: Array<Token>
+    body:
+      - let: chars
+        value: { characters: { ref: of } }
+      - var: i
+        value: 0
+      - var: tokens
+        type: Array<Token>
+        value: []
+      - value:
+          loop:
+            while: { of: { ref: i }, less_than: { count: { ref: chars } } }
+            body:
+              - let: ch
+                value: { ref: "chars[i]" }
+              - value:
+                  cases:
+                    - when: { of: { ref: ch }, is: " " }
+                      then:
+                        - set: i
+                          value: { of: { ref: i }, plus: 1 }
+                    - when: { isDigit: { ref: ch } }
+                      then:
+                        - let: text
+                          value: { call: { procedure: run, arguments: [ ref: chars, ref: i, false ] } }
+                        - set: tokens
+                          value: { of: { ref: tokens }, appending: { call: { procedure: token, arguments: [ number, ref: text ] } } }
+                    - when: { isLetter: { ref: ch } }
+                      then:
+                        - let: text
+                          value: { call: { procedure: run, arguments: [ ref: chars, ref: i, true ] } }
+                        - set: tokens
+                          value: { of: { ref: tokens }, appending: { call: { procedure: token, arguments: [ name, ref: text ] } } }
+                    - when: { of: { ref: ch }, one_of: { ref: ops } }
+                      then:
+                        - set: tokens
+                          value: { of: { ref: tokens }, appending: { call: { procedure: token, arguments: [ op, ref: ch ] } } }
+                        - set: i
+                          value: { of: { ref: i }, plus: 1 }
+                    - when: { of: { ref: ch }, is: "(" }
+                      then:
+                        - set: tokens
+                          value: { of: { ref: tokens }, appending: { call: { procedure: token, arguments: [ open, ref: ch ] } } }
+                        - set: i
+                          value: { of: { ref: i }, plus: 1 }
+                    - when: { of: { ref: ch }, is: ")" }
+                      then:
+                        - set: tokens
+                          value: { of: { ref: tokens }, appending: { call: { procedure: token, arguments: [ close, ref: ch ] } } }
+                        - set: i
+                          value: { of: { ref: i }, plus: 1 }
+                    - when: { of: { ref: ch }, is: ":" }
+                      then:
+                        - set: tokens
+                          value: { of: { ref: tokens }, appending: { call: { procedure: token, arguments: [ colon, ref: ch ] } } }
+                        - set: i
+                          value: { of: { ref: i }, plus: 1 }
+                    - when: { of: { ref: ch }, is: "," }
+                      then:
+                        - set: tokens
+                          value: { of: { ref: tokens }, appending: { call: { procedure: token, arguments: [ comma, ref: ch ] } } }
+                        - set: i
+                          value: { of: { ref: i }, plus: 1 }
+                    - else:
+                        - value: { abort: { format: "unexpected character '${ch}'", with: { ch: { ref: ch } } } }
+    result: { ref: tokens }
+
+  # "45.5" -> 45.5: digits before the point scale up, digits after it scale down
+  number:
+    isolated: true
+    const: true
+    failing: [ aborted ]
+    parameters: [ of: String ]
+    returns: Double
+    body:
+      - let: chars
+        value: { characters: { ref: of } }
+      - var: whole
+        value: 0.0
+      - var: fraction
+        value: 0.0
+      - var: scale
+        value: 1.0
+      - var: afterPoint
+        value: false
+      - let: walk
+        value:
+          each:
+            of: { ref: chars }
+            as: ch
+            body:
+              - value:
+                  cases:
+                    - when: { of: { ref: ch }, is: "." }
+                      then:
+                        - value:
+                            conditional:
+                              when: { ref: afterPoint }
+                              then:
+                                - value: { abort: { format: "'${of}' has two points", with: { of: { ref: of } } } }
+                        - set: afterPoint
+                          value: true
+                    - when: { isDigit: { ref: ch } }
+                      then:
+                        - let: digit
+                          value: { of: { call: { procedure: digit, arguments: [ ref: ch ] } }, divided_by: 1 }
+                        - value:
+                            conditional:
+                              when: { ref: afterPoint }
+                              then:
+                                - set: scale
+                                  value: { of: { ref: scale }, divided_by: 10 }
+                                - set: fraction
+                                  value: { of: { ref: fraction }, plus: { of: { ref: digit }, times: { ref: scale } } }
+                              else:
+                                - set: whole
+                                  value: { of: { of: { ref: whole }, times: 10.0 }, plus: { ref: digit } }
+                    - else:
+                        - value: { abort: { format: "'${of}' is not a number", with: { of: { ref: of } } } }
+    result: { of: { ref: whole }, plus: { ref: fraction } }

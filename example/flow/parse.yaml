@@ -1,0 +1,29 @@
+name: parse
+# Reads a plan from JSON. a name and a list of steps, each made by the registry.
+
+procedures:
+  plan:
+    failing: [ aborted, cast_refused, json_failed ]
+    parameters: [ text: String ]
+    returns: flow.Plan
+    body:
+      - let: json
+        value: { call: { procedure: JSON.parse, arguments: [ ref: text ] } }
+      - let: parsed
+        value: { as: { of: { ref: json }, type: "Dictionary<String, Any>" } }
+      - let: raw
+        value: { as: { of: { ref: 'parsed["steps"]' }, type: Array<Any> } }
+      - var: steps
+        type: Array<flow.Runnable>
+        value: []
+      - let: walk
+        value:
+          each:
+            of: { ref: raw }
+            as: struct
+            body:
+              - let: step
+                value: { call: { procedure: registry.make, arguments: [ as: { of: { ref: struct }, type: "Dictionary<String, Any>" } ] } }
+              - set: steps
+                value: { of: { ref: steps }, appending: { ref: step } }
+    result: { as: { of: { struct: { name: { as: { of: { ref: 'parsed["name"]' }, type: String } }, steps: { ref: steps } } }, type: flow.Plan } }

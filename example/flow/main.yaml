@@ -1,0 +1,39 @@
+name: flow
+# The entry. reads a plan file, runs it, writes the report and returns the number of failed steps.
+
+procedures:
+  main:
+    failing: [ aborted, cast_refused, file_failed, json_failed ]
+    access: public
+    parameters:
+      - path: String
+      - report: String?
+    returns: Int
+    body:
+      - var: target
+        value: out/report-yaml.txt
+      - value:
+          conditional:
+            when: { present: { ref: report } }
+            then: [ { set: target, value: { as: { of: { ref: report }, type: String } } } ]
+      - let: stored
+        value: { call: { procedure: File.read, arguments: [ ref: path ] } }
+      - value:
+          conditional:
+            when: { not: { present: { ref: stored } } }
+            then: [ value: { abort: { format: "no plan at ${path}", with: { path: { ref: path } } } } ]
+      - let: plan
+        value: { call: { procedure: parse.plan, arguments: [ as: { of: { ref: stored }, type: String } ] } }
+      - value: { call: { procedure: IO.write, arguments: [ { format: "plan ${name}: ${n} steps\n", with: { name: { ref: plan.name }, n: { count: { ref: plan.steps } } } } ] } }
+      - let: started
+        value: { call: { procedure: Time.now } }
+      - let: outcomes
+        value: { call: { procedure: exec.run, arguments: [ ref: plan ] } }
+      - let: finished
+        value: { call: { procedure: Time.now } }
+      - let: elapsed
+        value: { of: { ref: finished }, minus: { ref: started } }
+      - let: rendered
+        value: { call: { procedure: report.write, arguments: [ ref: outcomes, ref: elapsed, ref: target ] } }
+      - value: { call: { procedure: IO.write, arguments: [ { format: "${rendered}\n", with: { rendered: { ref: rendered } } } ] } }
+    result: { call: { procedure: report.failures, arguments: [ ref: outcomes ] } }
