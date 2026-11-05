@@ -1,0 +1,102 @@
+name: format
+# Lays the computed cells out as rows and columns of text, columns by letter and rows by number.
+
+procedures:
+  distinct:
+    parameters: [ of: Array<String> ]
+    returns: Array<String>
+    body:
+      - var: out
+        type: Array<String>
+        value: []
+      - let: walk
+        value:
+          each:
+            of: { ref: of }
+            as: name
+            body:
+              - value:
+                  conditional:
+                    when: { not: { of: { ref: out }, contains: { ref: name } } }
+                    then: [ { set: out, value: { of: { ref: out }, appending: { ref: name } } } ]
+    result: { sorted: { ref: out } }
+
+  grid:
+    failing: [ aborted ]
+    parameters: [ values: "Dictionary<String, Double>" ]
+    returns: String
+    body:
+      - let: cells
+        value: { sorted: { keys: { ref: values } } }
+      - var: columns
+        type: Array<String>
+        value: []
+      - var: rows
+        type: Array<Int>
+        value: []
+      - let: walk2
+        value:
+          each:
+            of: { ref: cells }
+            as: cell
+            body:
+              - set: columns
+                value: { of: { ref: columns }, appending: { call: { procedure: ast.column, arguments: [ ref: cell ] } } }
+              - set: rows
+                value: { of: { ref: rows }, appending: { call: { procedure: ast.row, arguments: [ ref: cell ] } } }
+      - let: cols
+        value: { call: { procedure: distinct, arguments: [ ref: columns ] } }
+      - var: rowSet
+        type: Array<Int>
+        value: []
+      - let: walk3
+        value:
+          each:
+            of: { ref: rows }
+            as: row
+            body:
+              - value:
+                  conditional:
+                    when: { not: { of: { ref: rowSet }, contains: { ref: row } } }
+                    then: [ { set: rowSet, value: { of: { ref: rowSet }, appending: { ref: row } } } ]
+      - let: rowList
+        value: { sorted: { ref: rowSet } }
+      - var: lines
+        type: Array<String>
+        value: [ { format: "     | ${heads}", with: { heads: { of: { ref: cols }, joined: " | " } } } ]
+      - let: walk4
+        value:
+          each:
+            of: { ref: rowList }
+            as: row
+            body:
+              - var: parts
+                type: Array<String>
+                value: []
+              - let: walk5
+                value:
+                  each:
+                    of: { ref: cols }
+                    as: col
+                    body:
+                      - let: held
+                        value: { call: { procedure: lookup, arguments: [ ref: values, { format: "${col}${row}", with: { col: { ref: col }, row: { ref: row } } } ] } }
+                      - set: parts
+                        value: { of: { ref: parts }, appending: { ref: held } }
+              - set: lines
+                value: { of: { ref: lines }, appending: { format: "${row}    | ${cells}", with: { row: { ref: row }, cells: { of: { ref: parts }, joined: " | " } } } }
+    result: { of: { ref: lines }, joined: "\n" }
+
+  lookup:
+    parameters: [ values: "Dictionary<String, Double>", cell: String ]
+    returns: String
+    body:
+      - let: held
+        value: { ref: "values?[cell]" }
+    result:
+      call:
+        procedure: Standard.Logic.select
+        arguments:
+          - { not: { present: { ref: held } } }
+          - { closure: { returns: String, const: true, isolated: true, result: "" } }
+          - { closure: { returns: String, const: true, isolated: true, result: { text: { ref: held } } } }

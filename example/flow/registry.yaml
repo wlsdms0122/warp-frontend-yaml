@@ -1,0 +1,26 @@
+name: registry
+# Makes a step from its raw dictionary by the kind it names.
+
+procedures:
+  make:
+    failing: [ aborted, cast_refused ]
+    parameters: [ of: "Dictionary<String, Any>" ]
+    returns: flow.Runnable
+    body:
+      - let: kind
+        value: { as: { of: { ref: 'of["kind"]' }, type: String } }
+      - value:
+          cases:
+            - when: { of: { ref: kind }, is: fetch }
+              then: [ value: { return: { call: { procedure: flow.Fetch.parse, arguments: [ ref: of ] } } } ]
+            - when: { of: { ref: kind }, is: count }
+              then: [ value: { return: { call: { procedure: flow.Count.parse, arguments: [ ref: of ] } } } ]
+            - when: { of: { ref: kind }, is: write }
+              then: [ value: { return: { call: { procedure: flow.Write.parse, arguments: [ ref: of ] } } } ]
+            - when: { of: { ref: kind }, is: print }
+              then: [ value: { return: { call: { procedure: flow.Print.parse, arguments: [ ref: of ] } } } ]
+            - when: { of: { ref: kind }, is: shell }
+              then: [ value: { return: { call: { procedure: flow.Shell.parse, arguments: [ ref: of ] } } } ]
+            - when: { of: { ref: kind }, is: sleep }
+              then: [ value: { return: { call: { procedure: flow.Sleep.parse, arguments: [ ref: of ] } } } ]
+      - value: { abort: { format: "unknown step kind: ${kind}", with: { kind: { ref: kind } } } }

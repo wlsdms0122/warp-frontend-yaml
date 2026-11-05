@@ -1,0 +1,26 @@
+name: flow
+# The plan, a step's outcome, and the contract a step conforms to.
+
+types:
+  Outcome: { struct: { id: String, ok: Bool, message: String, produced: Any } }
+  Plan: { struct: { name: String, steps: Array<Runnable> } }
+
+contracts:
+  Runnable:
+    procedures:
+      # What a step lets through is caught by exec, so the contract names what a step may fail with.
+      run: { parameters: [ of: Self ], returns: Outcome, failing: [ aborted, cast_refused, json_failed ] }
+      describe: { parameters: [ of: Self ], returns: String, const: true }
+
+procedures:
+  succeeded:
+    failing: [ cast_refused ]
+    parameters: [ id: String, value: Any, message: String ]
+    returns: Outcome
+    result: { as: { of: { struct: { id: { ref: id }, ok: true, message: { ref: message }, produced: { ref: value } } }, type: Outcome } }
+
+  failed:
+    failing: [ cast_refused ]
+    parameters: [ id: String, message: String ]
+    returns: Outcome
+    result: { as: { of: { struct: { id: { ref: id }, ok: false, message: { ref: message }, produced: null } }, type: Outcome } }
