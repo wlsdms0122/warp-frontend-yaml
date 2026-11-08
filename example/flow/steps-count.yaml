@@ -1,0 +1,56 @@
+name: flow
+# The count step. Count the collection another step produced.
+
+types:
+  Count:
+    struct: { id: String, from: String }
+    satisfies: [ flow.Runnable ]
+    procedures:
+      run:
+        failing: [ cast_refused ]
+        parameters: [ of: Count ]
+        returns: flow.Outcome
+        body:
+          - let: value
+            value: { call: { procedure: state.get, arguments: [ ref: of.from ] } }
+          - let: list
+            value: { as?: { of: { ref: value }, type: Array<Any> } }
+          - let: table
+            value: { as?: { of: { ref: value }, type: "Dictionary<String, Any>" } }
+          - var: n
+            value: 0
+          - value:
+              cases:
+                - when: { present: { ref: list } }
+                  then: [ { set: n, value: { count: { as: { of: { ref: list }, type: Array<Any> } } } } ]
+                - when: { present: { ref: table } }
+                  then: [ { set: n, value: { count: { as: { of: { ref: table }, type: "Dictionary<String, Any>" } } } } ]
+                - else:
+                    - value:
+                        return:
+                          call:
+                            procedure: flow.failed
+                            arguments:
+                              - { ref: of.id }
+                              - { format: "'${from}' holds nothing countable", with: { from: { ref: of.from } } }
+          - value: { call: { procedure: state.put, arguments: [ ref: of.id, ref: n ] } }
+        result:
+          call:
+            procedure: flow.succeeded
+            arguments:
+              - { ref: of.id }
+              - { ref: n }
+              - { format: "${n} elements", with: { n: { ref: n } } }
+
+      describe:
+        const: true
+        parameters: [ of: Count ]
+        returns: String
+        result: { format: "count ${from}", with: { from: { ref: of.from } } }
+
+procedures:
+  Count.parse:
+    failing: [ cast_refused ]
+    parameters: [ of: "Dictionary<String, Any>" ]
+    returns: Count
+    result: { as: { of: { struct: { id: { as: { of: { ref: 'of["id"]' }, type: String } }, from: { as: { of: { ref: 'of["from"]' }, type: String } } } }, type: Count } }
