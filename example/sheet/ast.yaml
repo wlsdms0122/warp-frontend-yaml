@@ -1,0 +1,215 @@
+name: ast
+# A formula's tree, a number, a cell, a range, an operator over two, or a function over arguments, and which cells a tree reads.
+
+types:
+  Node: { struct: { kind: String, number: Double, name: String, args: Array<Node>, left: Node?, right: Node? } }
+
+const:
+  letters: [ A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z ]
+
+procedures:
+  number:
+    failing: [ cast_refused ]
+    parameters: [ n: Double ]
+    returns: Node
+    result: { as: { of: { struct: { kind: number, number: { ref: n }, name: "", args: [], left: null, right: null } }, type: Node } }
+
+  ref:
+    failing: [ cast_refused ]
+    parameters: [ cell: String ]
+    returns: Node
+    result: { as: { of: { struct: { kind: ref, number: 0.0, name: { ref: cell }, args: [], left: null, right: null } }, type: Node } }
+
+  range:
+    failing: [ cast_refused ]
+    parameters: [ from: String, to: String ]
+    returns: Node
+    result:
+      as: { of: { struct: { kind: range, number: 0.0, name: "", args: [], left: { call: { procedure: ref, arguments: [ ref: from ] } }, right: { call: { procedure: ref, arguments: [ ref: to ] } } } }, type: Node }
+
+  binary:
+    failing: [ cast_refused ]
+    parameters: [ op: String, left: Node, right: Node ]
+    returns: Node
+    result: { as: { of: { struct: { kind: binary, number: 0.0, name: { ref: op }, args: [], left: { ref: left }, right: { ref: right } } }, type: Node } }
+
+  call:
+    failing: [ cast_refused ]
+    parameters: [ function: String, args: Array<Node> ]
+    returns: Node
+    result: { as: { of: { struct: { kind: call, number: 0.0, name: { ref: function }, args: { ref: args }, left: null, right: null } }, type: Node } }
+
+  # A1 -> column "A", row 1
+  column:
+    isolated: true
+    const: true
+    parameters: [ of: String ]
+    returns: String
+    body:
+      - let: chars
+        value: { characters: { ref: of } }
+      - var: found
+        type: Array<String>
+        value: []
+      - let: walk
+        value:
+          each:
+            of: { ref: chars }
+            as: ch
+            body:
+              - value:
+                  conditional:
+                    when: { call: { procedure: lex.isLetter, arguments: [ ref: ch ] } }
+                    then: [ { set: found, value: { of: { ref: found }, appending: { ref: ch } } } ]
+    result: { of: { ref: found }, joined: '' }
+
+  row:
+    isolated: true
+    const: true
+    failing: [ aborted ]
+    parameters: [ of: String ]
+    returns: Int
+    body:
+      - let: chars
+        value: { characters: { ref: of } }
+      - var: digits
+        type: Array<String>
+        value: []
+      - let: walk2
+        value:
+          each:
+            of: { ref: chars }
+            as: ch
+            body:
+              - value:
+                  conditional:
+                    when: { call: { procedure: lex.isDigit, arguments: [ ref: ch ] } }
+                    then: [ { set: digits, value: { of: { ref: digits }, appending: { ref: ch } } } ]
+      - value:
+          conditional:
+            when: { of: { count: { ref: digits } }, is: 0 }
+            then: [ value: { abort: { format: "'${of}' names no row", with: { of: { ref: of } } } } ]
+      - let: spelled
+        value: { of: { ref: digits }, joined: '' }
+    result: { floored: { call: { procedure: lex.number, arguments: [ ref: spelled ] } } }
+
+  columnIndex:
+    isolated: true
+    failing: [ aborted ]
+    parameters: [ of: String ]
+    returns: Int
+    body:
+      - var: found
+        value: -1
+      - let: walk3
+        value:
+          each:
+            of: { ref: letters }
+            as: letter
+            index: index
+            body:
+              - value:
+                  conditional:
+                    when: { of: { ref: letter }, is: { ref: of } }
+                    then: [ { set: found, value: { ref: index } } ]
+      - value:
+          conditional:
+            when: { of: { ref: found }, less_than: 0 }
+            then: [ value: { abort: { format: "'${of}' is not a column", with: { of: { ref: of } } } } ]
+    result: { ref: found }
+
+  # the cells a range A1:A3 or A1:C1 covers, in order
+  cells:
+    isolated: true
+    failing: [ aborted ]
+    parameters: [ from: String, to: String ]
+    returns: Array<String>
+    body:
+      - let: c1
+        value: { call: { procedure: column, arguments: [ ref: from ] } }
+      - let: c2
+        value: { call: { procedure: column, arguments: [ ref: to ] } }
+      - let: r1
+        value: { call: { procedure: row, arguments: [ ref: from ] } }
+      - let: r2
+        value: { call: { procedure: row, arguments: [ ref: to ] } }
+      - var: cells
+        type: Array<String>
+        value: []
+      - value:
+          cases:
+            - when: { of: { ref: c1 }, is: { ref: c2 } }
+              then:
+                - var: r
+                  value: { ref: r1 }
+                - value:
+                    loop:
+                      while: { of: { ref: r }, less_than: { of: { ref: r2 }, plus: 1 } }
+                      body:
+                        - set: cells
+                          value: { of: { ref: cells }, appending: { format: "${c1}${r}", with: { c1: { ref: c1 }, r: { ref: r } } } }
+                        - set: r
+                          value: { of: { ref: r }, plus: 1 }
+            - when: { of: { ref: r1 }, is: { ref: r2 } }
+              then:
+                - var: c
+                  value: { call: { procedure: columnIndex, arguments: [ ref: c1 ] } }
+                - let: last
+                  value: { call: { procedure: columnIndex, arguments: [ ref: c2 ] } }
+                - value:
+                    loop:
+                      while: { of: { ref: c }, less_than: { of: { ref: last }, plus: 1 } }
+                      body:
+                        - set: cells
+                          value: { of: { ref: cells }, appending: { format: "${letter}${r1}", with: { letter: { ref: "letters[c]" }, r1: { ref: r1 } } } }
+                        - set: c
+                          value: { of: { ref: c }, plus: 1 }
+            - else:
+                - value: { abort: { format: "a range runs down one column or across one row: ${from}:${to}", with: { from: { ref: from }, to: { ref: to } } } }
+    result: { ref: cells }
+
+  # every cell a tree reads
+  refs:
+    failing: [ aborted, cast_refused ]
+    parameters: [ of: Node ]
+    returns: Array<String>
+    body:
+      - var: found
+        type: Array<String>
+        value: []
+      - value:
+          cases:
+            - when: { of: { ref: of.kind }, is: ref }
+              then: [ { set: found, value: [ ref: of.name ] } ]
+            - when: { of: { ref: of.kind }, is: range }
+              then:
+                - set: found
+                  value: { call: { procedure: cells, arguments: [ as: { of: { ref: "of.left?.name" }, type: String }, as: { of: { ref: "of.right?.name" }, type: String } ] } }
+            - when: { of: { ref: of.kind }, is: binary }
+              then:
+                - let: l
+                  value: { call: { procedure: refs, arguments: [ as: { of: { ref: of.left }, type: Node } ] } }
+                - let: r
+                  value: { call: { procedure: refs, arguments: [ as: { of: { ref: of.right }, type: Node } ] } }
+                - let: walk4
+                  value:
+                    each: { of: { ref: l }, as: cell, body: [ { set: found, value: { of: { ref: found }, appending: { ref: cell } } } ] }
+                - let: walk5
+                  value:
+                    each: { of: { ref: r }, as: cell, body: [ { set: found, value: { of: { ref: found }, appending: { ref: cell } } } ] }
+            - when: { of: { ref: of.kind }, is: call }
+              then:
+                - let: args
+                  value: { ref: of.args }
+                - let: walk6
+                  value:
+                    each:
+                      of: { ref: args }
+                      as: arg
+                      body:
+                        - let: inner
+                          value: { call: { procedure: refs, arguments: [ ref: arg ] } }
+                        - let: walk7
+                          value:
+                            each: { of: { ref: inner }, as: cell, body: [ { set: found, value: { of: { ref: found }, appending: { ref: cell } } } ] }
+    result: { ref: found }

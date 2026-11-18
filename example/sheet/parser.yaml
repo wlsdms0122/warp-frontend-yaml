@@ -1,0 +1,234 @@
+name: parse
+# A formula's text as a tree. expr is terms joined by + and -, term is factors joined by * and /, factor is a number, a cell, a call, a parenthesis or a negation.
+
+procedures:
+  formula:
+    failing: [ aborted, cast_refused ]
+    parameters: [ of: String ]
+    returns: ast.Node
+    body:
+      - let: tokens
+        value: { call: { procedure: lex.tokens, arguments: [ ref: of ] } }
+      - var: at
+        value: 0
+      - value:
+          conditional:
+            when: { of: { count: { ref: tokens } }, is: 0 }
+            then: [ value: { abort: "an empty formula" } ]
+      - let: tree
+        value: { call: { procedure: expr, arguments: [ ref: tokens, ref: at ] } }
+      - value:
+          conditional:
+            when: { of: { ref: at }, less_than: { count: { ref: tokens } } }
+            then: [ value: { abort: { format: "unexpected '${text}'", with: { text: { ref: "tokens[at].text" } } } } ]
+    result: { ref: tree }
+
+  # whether the token at `at` is there and of this kind
+  peek:
+    const: true
+    isolated: true
+    parameters: [ tokens: Array<lex.Token>, at: Int, kind: String ]
+    returns: Bool
+    result:
+      all_of:
+        - { of: { ref: at }, less_than: { count: { ref: tokens } } }
+        - { of: { ref: "tokens[at].kind" }, is: { ref: kind } }
+
+  # the operator's text where the token at `at` is one of these, else ""
+  operatorAmong:
+    parameters: [ tokens: Array<lex.Token>, at: Int, among: Array<String> ]
+    returns: String
+    body:
+      - var: found
+        value: ""
+      - value:
+          conditional:
+            when:
+              all_of:
+                - { call: { procedure: peek, arguments: [ ref: tokens, ref: at, op ] } }
+                - { of: { ref: "tokens[at].text" }, one_of: { ref: among } }
+            then: [ { set: found, value: { ref: "tokens[at].text" } } ]
+    result: { ref: found }
+
+  expr:
+    failing: [ aborted, cast_refused ]
+    parameters: [ tokens: Array<lex.Token>, at: inout Int ]
+    returns: ast.Node
+    body:
+      - var: left
+        value: { call: { procedure: term, arguments: [ ref: tokens, ref: at ] } }
+      - var: op
+        value: { call: { procedure: operatorAmong, arguments: [ ref: tokens, ref: at, [ "+", "-" ] ] } }
+      - value:
+          loop:
+            while: { of: { ref: op }, is_not: "" }
+            body:
+              - set: at
+                value: { of: { ref: at }, plus: 1 }
+              - let: right
+                value: { call: { procedure: term, arguments: [ ref: tokens, ref: at ] } }
+              - set: left
+                value: { call: { procedure: ast.binary, arguments: [ ref: op, ref: left, ref: right ] } }
+              - set: op
+                value: { call: { procedure: operatorAmong, arguments: [ ref: tokens, ref: at, [ "+", "-" ] ] } }
+    result: { ref: left }
+
+  term:
+    failing: [ aborted, cast_refused ]
+    parameters: [ tokens: Array<lex.Token>, at: inout Int ]
+    returns: ast.Node
+    body:
+      - var: left
+        value: { call: { procedure: factor, arguments: [ ref: tokens, ref: at ] } }
+      - var: op
+        value: { call: { procedure: operatorAmong, arguments: [ ref: tokens, ref: at, [ "*", "/" ] ] } }
+      - value:
+          loop:
+            while: { of: { ref: op }, is_not: "" }
+            body:
+              - set: at
+                value: { of: { ref: at }, plus: 1 }
+              - let: right
+                value: { call: { procedure: factor, arguments: [ ref: tokens, ref: at ] } }
+              - set: left
+                value: { call: { procedure: ast.binary, arguments: [ ref: op, ref: left, ref: right ] } }
+              - set: op
+                value: { call: { procedure: operatorAmong, arguments: [ ref: tokens, ref: at, [ "*", "/" ] ] } }
+    result: { ref: left }
+
+  factor:
+    failing: [ aborted, cast_refused ]
+    parameters: [ tokens: Array<lex.Token>, at: inout Int ]
+    returns: ast.Node
+    body:
+      - value:
+          conditional:
+            when: { of: { ref: at }, is: { count: { ref: tokens } } }
+            then: [ value: { abort: "the formula ends where a value should stand" } ]
+      - let: token
+        value: { ref: "tokens[at]" }
+      - var: made
+        value: { call: { procedure: ast.number, arguments: [ 0.0 ] } }
+      - value:
+          cases:
+            - when: { of: { ref: token.kind }, is: number }
+              then:
+                - set: at
+                  value: { of: { ref: at }, plus: 1 }
+                - let: n
+                  value: { call: { procedure: lex.number, arguments: [ ref: token.text ] } }
+                - set: made
+                  value: { call: { procedure: ast.number, arguments: [ ref: n ] } }
+            - when: { of: { ref: token.kind }, is: name }
+              then:
+                - set: at
+                  value: { of: { ref: at }, plus: 1 }
+                - value:
+                    conditional:
+                      when: { call: { procedure: peek, arguments: [ ref: tokens, ref: at, open ] } }
+                      then:
+                        - set: at
+                          value: { of: { ref: at }, plus: 1 }
+                        - let: args
+                          value: { call: { procedure: args, arguments: [ ref: tokens, ref: at ] } }
+                        - set: made
+                          value: { call: { procedure: ast.call, arguments: [ ref: token.text, ref: args ] } }
+                      else:
+                        - set: made
+                          value: { call: { procedure: ast.ref, arguments: [ ref: token.text ] } }
+            - when: { of: { ref: token.kind }, is: open }
+              then:
+                - set: at
+                  value: { of: { ref: at }, plus: 1 }
+                - set: made
+                  value: { call: { procedure: expr, arguments: [ ref: tokens, ref: at ] } }
+                - value:
+                    conditional:
+                      when: { call: { procedure: peek, arguments: [ ref: tokens, ref: at, close ] } }
+                      then: [ { set: at, value: { of: { ref: at }, plus: 1 } } ]
+                      else: [ value: { abort: "a '(' without its ')'" } ]
+            - when: { all_of: [ { of: { ref: token.kind }, is: op }, { of: { ref: token.text }, is: "-" } ] }
+              then:
+                - set: at
+                  value: { of: { ref: at }, plus: 1 }
+                - let: negated
+                  value: { call: { procedure: factor, arguments: [ ref: tokens, ref: at ] } }
+                - let: zero
+                  value: { call: { procedure: ast.number, arguments: [ 0.0 ] } }
+                - set: made
+                  value: { call: { procedure: ast.binary, arguments: [ "-", ref: zero, ref: negated ] } }
+            - else:
+                - value: { abort: { format: "unexpected '${text}'", with: { text: { ref: token.text } } } }
+    result: { ref: made }
+
+  # arguments up to the closing parenthesis; an argument is a range A1:A3 or an expression
+  args:
+    failing: [ aborted, cast_refused ]
+    parameters: [ tokens: Array<lex.Token>, at: inout Int ]
+    returns: Array<ast.Node>
+    body:
+      - var: args
+        type: Array<ast.Node>
+        value: []
+      - var: going
+        value: true
+      - value:
+          loop:
+            while: { ref: going }
+            body:
+              - let: isRange
+                value:
+                  all_of:
+                    - { call: { procedure: peek, arguments: [ ref: tokens, ref: at, name ] } }
+                    - { call: { procedure: colonFollows, arguments: [ ref: tokens, ref: at ] } }
+              - value:
+                  conditional:
+                    when: { ref: isRange }
+                    then:
+                      - let: from
+                        value: { ref: "tokens[at].text" }
+                      - set: at
+                        value: { of: { ref: at }, plus: 2 }
+                      - value:
+                          conditional:
+                            when: { call: { procedure: peek, arguments: [ ref: tokens, ref: at, name ] } }
+                            then: []
+                            else: [ value: { abort: "a range needs a cell after ':'" } ]
+                      - let: to
+                        value: { ref: "tokens[at].text" }
+                      - set: at
+                        value: { of: { ref: at }, plus: 1 }
+                      - let: made
+                        value: { call: { procedure: ast.range, arguments: [ ref: from, ref: to ] } }
+                      - set: args
+                        value: { of: { ref: args }, appending: { ref: made } }
+                    else:
+                      - let: expr
+                        value: { call: { procedure: expr, arguments: [ ref: tokens, ref: at ] } }
+                      - set: args
+                        value: { of: { ref: args }, appending: { ref: expr } }
+              - value:
+                  cases:
+                    - when: { call: { procedure: peek, arguments: [ ref: tokens, ref: at, comma ] } }
+                      then: [ { set: at, value: { of: { ref: at }, plus: 1 } } ]
+                    - when: { call: { procedure: peek, arguments: [ ref: tokens, ref: at, close ] } }
+                      then:
+                        - set: at
+                          value: { of: { ref: at }, plus: 1 }
+                        - set: going
+                          value: false
+                    - else: [ value: { abort: "a call without its ')'" } ]
+    result: { ref: args }
+
+  colonFollows:
+    const: true
+    isolated: true
+    parameters: [ tokens: Array<lex.Token>, at: Int ]
+    returns: Bool
+    body:
+      - let: next
+        value: { of: { ref: at }, plus: 1 }
+    result:
+      all_of:
+        - { of: { ref: next }, less_than: { count: { ref: tokens } } }
+        - { of: { ref: "tokens[next].kind" }, is: colon }
